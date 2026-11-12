@@ -1,0 +1,30 @@
+Package: slimeta
+Title: Stacked Linear Mixed-Effects Framework for Multivariate
+        Meta-Analysis
+Version: 0.1.1
+Authors@R: 
+    person("Nusrat", "Rabbee", email = "rabbee@berkeley.edu", role = c("aut", "cre"))
+Description: Implements the Stacked Linear Mixed-Effects (SLIM) framework for
+    multivariate meta-analysis with correlated endpoints, as described in
+    Rabbee (2026) <doi:10.1186/s12874-026-02852-x>. SLIM enables joint
+    modeling of multiple endpoints across studies, estimation of between-study
+    correlation structure, translation of treatment effects between endpoints
+    via the eta coefficient, hypothesis testing for effect heterogeneity across
+    strata (Cochran's Q and Dunnett tests), and sample size calculations for
+    trial design. Built on top of the 'metafor' package.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends: R (>= 3.5.0)
+Imports: metafor, ggplot2, grid, gridExtra, mvtnorm, stats,
+        clubSandwich
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
+VignetteBuilder: knitr
+URL: https://github.com/rabbee001/slimeta
+BugReports: https://github.com/rabbee001/slimeta/issues
+LazyData: true
+NeedsCompilation: no
+Packaged: 2026-11-11 22:07:39 UTC; nusrat.rabbee
+Author: Nusrat Rabbee [aut, cre]
+Maintainer: Nusrat Rabbee <rabbee@berkeley.edu>

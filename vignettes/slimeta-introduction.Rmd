@@ -1,0 +1,337 @@
+---
+title: "Introduction to slimeta"
+author: "Nusrat Rabbee"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to slimeta}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, comment = "")
+old_opts <- options(digits = 4)
+```
+
+## Introduction
+
+The **slimeta** package implements the Stacked Linear Mixed-Effects (SLIM) framework for multivariate meta-analysis with correlated endpoints, as described in:
+
+> Rabbee N. (2026). **Translating treatment effects between correlated endpoints.** *BMC Medical Research Methodology*. https://doi.org/10.1186/s12874-026-02852-x
+
+Clinical researchers frequently need to answer: "If a treatment changes endpoint 1 by X%, what change in endpoint 2 should we expect?" The SLIM framework addresses this by defining the Expected Translational Association ($\eta$), which translates treatment effects across correlated endpoints without assuming a directional or parametric relationship between them.
+
+SLIM enables:
+
+1. Joint modeling of multiple endpoints across studies
+2. Estimation of between-study correlation structure
+3. Translation of treatment effects between endpoints via eta
+4. Hypothesis testing for effect heterogeneity across strata
+5. Sample size calculations for trial design
+
+## Mathematical Framework
+
+### The SLIM Model
+
+For study $i$ and endpoint $j$:
+$$Y_{ij} = \mu_j + u_{ij} + \varepsilon_{ij}$$
+
+where:
+
+- $\mu_j$ = population mean for endpoint $j$
+- $u_{ij}$ = study-level random effect
+- $\varepsilon_{ij} \sim N(0, V_{ij})$ = sampling error (known)
+
+The random effects follow a bivariate normal:
+$$(u_{i1}, u_{i2})' \sim N(0, G)$$
+
+where $G$ is the between-study covariance matrix:
+$$G = \begin{pmatrix} \tau_{11} & \tau_{12} \\ \tau_{12} & \tau_{22} \end{pmatrix}$$
+
+### Key Quantities
+
+| Quantity | Formula | Interpretation |
+|----------|---------|----------------|
+| $R^2_{between}$ | $\tau_{12}^2 / (\tau_{11} \times \tau_{22})$ | Between-study correlation squared |
+| $\eta$ | $\tau_{12} / \tau_{11}$ | Translation coefficient |
+| Conditional Variance | $\tau_{22} - \tau_{12}^2 / \tau_{11}$ | Residual variance after conditioning |
+
+### Conditional Expectation
+
+The translation coefficient $\eta$ enables prediction of one endpoint from another:
+$$E(Y_2 | Y_1) = \mu_2 + \eta \times (Y_1 - \mu_1)$$
+
+## Example 1: AAA Growth and Rupture
+
+The RESCAN collaboration collected data on abdominal aortic aneurysm (AAA) growth rates and rupture risk across 18 centers, stratified by initial diameter (30, 35, 40, 45, 50 mm). This example is based on Figure 3 from Rabbee (2026). It uses the package defaults (unstructured $G$ and Satterthwaite confidence intervals), so the RuptureRisk estimates and all confidence intervals differ somewhat from the paper. To reproduce the published Table 1, add `struct = "CS", satterthwaite = FALSE` to the `slim_fit()` call.
+
+### Step 1: Load Data and Fit the SLIM Model
+
+The `aaa` dataset is included with the package:
+
+```{r aaa-fit}
+library(slimeta)
+data(aaa)
+
+# View structure
+head(aaa)
+
+# aaa stores RuptureRisk on the log scale (y, se), but slim_fit() applies the
+# log transform itself. Give it the rate (per patient-year) and its SE on the
+# original scale (delta method: SE(rate) = rate x SE(log rate)).
+aaa_fit <- aaa
+rup <- aaa_fit$Endpoint == "RuptureRisk"
+aaa_fit$y[rup]  <- aaa_fit$Mean[rup]
+aaa_fit$se[rup] <- aaa_fit$Mean[rup] * aaa_fit$se[rup]
+
+# Fit SLIM model
+result <- slim_fit(
+  data          = aaa_fit,
+  formula       = ~ 0 + Endpoint:factor(Diameter),
+  trial_col     = "Study",
+  endpoint_col  = "Endpoint",
+  y_col         = "y",
+  se_col        = "se",
+  transform     = list(RuptureRisk = "log"),
+  display_scale = list(RuptureRisk = 1000)
+)
+
+# Key results
+result$R2_between  # Between-study R-squared
+result$eta         # Translation coefficient
+result$ci_eta      # 95% CI for eta
+result$pooled      # pooled means by endpoint and diameter, on the display scale
+```
+
+By default `slim_fit()` fits an unstructured $G$ (`struct = "UN"`), so $\tau_{11}$, $\tau_{12}$ and $\tau_{22}$ are all estimated and $\eta = \tau_{12}/\tau_{11}$ as defined above. The option `struct = "CS"` forces $\tau_{11} = \tau_{22}$, which makes $\eta$ equal to the correlation. The confidence intervals for the pooled means use cluster-robust (CR2) variance estimation with Satterthwaite degrees of freedom, a small-sample correction (`satterthwaite = TRUE`); the `df` column of `result$pooled` gives the degrees of freedom. Set `satterthwaite = FALSE` for plain Wald intervals.
+
+### Interpreting $\eta$ and $R^2$
+
+**$\eta$ (eta)** answers: "By how much?" It is calculated on the transformed scale and is not back-transformed.
+
+In this example, GrowthRate is untransformed (mm/year) while RuptureRisk is log-transformed. So $\eta$ = `r round(result$eta, 3)` means: a 1 mm/year increase in growth rate corresponds to a `r round(result$eta, 3)` increase in **log**(rupture risk).
+
+To interpret on the original scale: $\exp(\eta) \approx$ `r round(exp(result$eta), 2)`, meaning rupture risk is multiplied by about that factor for each 1 mm/year increase in growth rate.
+
+**$R^2$ (between-study)** answers: "How predictable is the relationship?" It measures how much of the between-study variance in endpoint 2 is explained by endpoint 1.
+
+$R^2$ = `r round(result$R2_between, 2)` means `r round(100 * result$R2_between)`% of the variation in rupture risk across centers is explained by their growth rates. The remaining `r round(100 - 100 * result$R2_between)`% is due to other factors (patient mix, measurement differences, etc.).
+
+### Step 2: Visualize (based on Figure 3 from Rabbee 2026)
+
+The following code generates plots comparing SLIM model estimates with observed means, similar to Figure 3 in the paper:
+
+```{r aaa-plot, fig.width=10, fig.height=5}
+library(ggplot2)
+library(gridExtra)
+
+# Get pooled estimates from the model
+res <- result$pooled
+res$Endpoint <- ifelse(grepl("GrowthRate", res$term), "GrowthRate", "RuptureRisk")
+res$Diameter <- as.numeric(gsub(".*Diameter)", "", res$term))
+
+# Calculate observed means from data
+obs_growth <- aggregate(Mean ~ Diameter,
+                        data = subset(aaa, Endpoint == "GrowthRate"),
+                        FUN = mean)
+obs_growth$Endpoint <- "GrowthRate"
+names(obs_growth)[2] <- "Observed"
+
+obs_rupture <- aggregate(Mean1000 ~ Diameter,
+                         data = subset(aaa, Endpoint == "RuptureRisk"),
+                         FUN = mean)
+obs_rupture$Endpoint <- "RuptureRisk"
+names(obs_rupture)[2] <- "Observed"
+
+obs <- rbind(obs_growth, obs_rupture)
+obs$Diameter <- as.numeric(as.character(obs$Diameter))
+
+# Merge model estimates with observed
+plotdata <- merge(res, obs, by = c("Diameter", "Endpoint"))
+plotdata$Model <- "SLIM"
+
+# Growth Rate plot
+p1 <- ggplot(subset(plotdata, Endpoint == "GrowthRate"),
+             aes(x = Diameter, y = est)) +
+  geom_point(aes(color = Model), size = 3) +
+  geom_errorbar(aes(ymin = ci.lb, ymax = ci.ub, color = Model), width = 1) +
+  geom_point(aes(x = Diameter, y = Observed), shape = 8, size = 3, color = "black") +
+  labs(x = "Diameter (mm)", y = "Estimate / Observed Mean",
+       title = "GrowthRate (mm/yr)") +
+  scale_color_manual(values = c("SLIM" = "red")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Rupture Risk plot
+p2 <- ggplot(subset(plotdata, Endpoint == "RuptureRisk"),
+             aes(x = Diameter, y = est)) +
+  geom_point(aes(color = Model), size = 3) +
+  geom_errorbar(aes(ymin = ci.lb, ymax = ci.ub, color = Model), width = 1) +
+  geom_point(aes(x = Diameter, y = Observed), shape = 8, size = 3, color = "black") +
+  labs(x = "Diameter (mm)", y = "Estimate / Observed Mean",
+       title = "RuptureRisk (per 1000 p.y.)") +
+  scale_color_manual(values = c("SLIM" = "red")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Combine panels
+grid.arrange(p1, p2, ncol = 2,
+  top = "SLIM Estimates (red, with 95% CI) vs Observed Means (black star)")
+```
+
+The plots show SLIM pooled estimates (red points with 95% confidence intervals) compared to observed study means (black stars) for each diameter stratum.
+
+Additional visualization options:
+
+```{r eval=FALSE}
+# Scatter plot by study with conditional expectation line
+out <- slim2EP_plot_by_study(
+  result,
+  data         = aaa_fit,
+  endpoints    = c("GrowthRate", "RuptureRisk"),
+  title        = "AAA: Growth vs Rupture",
+  facet_by     = "Diameter",
+  facet_scales = "fixed",
+  y_scale      = "log"
+)
+out$plot
+```
+
+### Step 3: Test for Heterogeneity in Eta
+
+Does the translation coefficient differ across diameter strata?
+
+```{r aaa-heterogeneity}
+# Cochran's Q test for eta heterogeneity
+eta_test <- slim_eta_by_stratum(
+  data          = aaa_fit,
+  strata_col    = "Diameter",
+  endpoints     = c("GrowthRate", "RuptureRisk"),
+  trial_col     = "Study",
+  endpoint_col  = "Endpoint",
+  y_col         = "y",
+  se_col        = "se",
+  transform     = list(RuptureRisk = "log")
+)
+
+eta_test$Q_test  # Q statistic and p-value
+```
+
+The Q test does not reject a common $\eta$ across the diameter strata ($p > 0.05$). With only a few centers per stratum the stratum-specific estimates of $\eta$ are imprecise, so this test has limited power; a non-significant result is not evidence that $\eta$ is the same in every stratum.
+
+### Step 4: Sample Size Calculation
+
+```{r aaa-samplesize}
+ss <- slim_sample_size(
+  result       = result,
+  endpoint     = "GrowthRate",
+  effect_size  = -0.67,              # 0.67 mm/year reduction
+  sd           = 3.5,
+  strata_col   = "Diameter",
+  weights      = c(0.05, 0.45, 0.45, 0.03, 0.02),
+  adjustments  = list(statin = -0.63),
+  power        = 0.90,
+  alpha        = 0.05
+)
+
+ss$n_total        # Total N required
+ss$translation    # Implied effect on RuptureRisk via eta
+```
+
+## Example 2: Obesity Drug Classes (Conceptual)
+
+For obesity trials comparing GLP-1 vs GIP agonists with endpoints WeightLoss and HbA1c:
+
+```{r eval=FALSE}
+# Fit SLIM with drug class as stratum
+result <- slim_fit(
+  data         = obesity_data,
+  formula      = ~ 0 + Endpoint:DrugClass,
+  random       = ~ Endpoint | Study,
+  trial_col    = "Study",
+  endpoint_col = "Endpoint",
+  y_col        = "Effect",
+  se_col       = "SE"
+)
+
+# Test if eta differs by drug class
+eta_test <- slim_eta_by_stratum(
+  data       = obesity_data,
+  strata_col = "DrugClass",
+  endpoints  = c("WeightLoss", "HbA1c"),
+  ...
+)
+
+dunnett <- slim_eta_dunnett(
+  result         = result,
+  eta_by_stratum = eta_test,
+  data           = obesity_data,
+  strata_col     = "DrugClass",
+  ...
+)
+
+# If p < 0.05: GLP-1 and GIP have different translation coefficients
+# This would mean the weight loss -> glycemic control relationship
+# differs between drug mechanisms
+```
+
+## Pre-Processing: Handling Extreme Rate Ratios
+
+When rate ratios or risk ratios are very close to zero (e.g., rare events), even log-transformation can produce unstable estimates with huge standard errors. These extreme values can dominate the meta-analysis.
+
+The `slim_prior_adjust()` function applies Bayesian shrinkage before stacking:
+
+```{r eval=FALSE}
+# Original data has some rate ratios near zero
+data_adj <- slim_prior_adjust(
+  data       = mydata,
+  y_col      = "log_RR",
+  se_col     = "SE_log_RR",
+  prior_type = "normal",
+  prior_mean = 0,         # no effect (RR = 1 on original scale)
+  prior_sd   = 1.0        # weakly informative
+)
+
+# Visualize the shrinkage
+slim_prior_plot(data_adj, "log_RR", "SE_log_RR")
+
+# Use adjusted values in SLIM
+result <- slim_fit(
+  data     = data_adj,
+  y_col    = "log_RR_adj",
+  se_col   = "SE_log_RR_adj",
+  ...
+)
+```
+
+**How it works:** For a normal prior and observed effect $y$ with SE $\sigma$:
+
+$$\text{posterior mean} = \frac{y/\sigma^2 + \mu_0/\tau^2}{1/\sigma^2 + 1/\tau^2}$$
+
+Studies with large SEs (unstable estimates) are shrunk more toward the prior mean; studies with small SEs (precise estimates) retain their original values.
+
+## Function Reference
+
+| Function | Purpose |
+|----------|---------|
+| `slim_fit()` | Fit SLIM model via metafor::rma.mv() |
+| `slim_forest()` | Forest plot by endpoint (overall or by stratum) |
+| `slim2EP_plot_by_covariate()` | Panel plot: model vs observed by covariate |
+| `slim2EP_plot_by_study()` | Scatter plot with E(Y2 given Y1) line |
+| `slim_eta_by_stratum()` | Test eta heterogeneity (Cochran's Q) |
+| `slim_eta_dunnett()` | Test eta heterogeneity (Dunnett, more powerful) |
+| `slim_sample_size()` | Sample size calculation for trial design |
+| `slim_prior_adjust()` | Bayesian shrinkage for extreme estimates |
+| `slim_prior_plot()` | Visualize original vs adjusted estimates |
+
+## References
+
+Rabbee N. (2026). Translating treatment effects between correlated endpoints. *BMC Medical Research Methodology*. https://doi.org/10.1186/s12874-026-02852-x
+
+Viechtbauer W. (2010). Conducting meta-analyses in R with the metafor package. *Journal of Statistical Software*, 36(3), 1-48.
+
+```{r reset-options, include=FALSE}
+# Restore the user's options
+options(old_opts)
+```

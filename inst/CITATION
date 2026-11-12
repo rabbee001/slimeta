@@ -1,0 +1,17 @@
+bibentry(
+  bibtype  = "Article",
+  title    = "Translating treatment effects between correlated endpoints",
+  author   = person("Nusrat", "Rabbee", email = "rabbee@berkeley.edu"),
+  journal  = "BMC Medical Research Methodology",
+  year     = "2026",
+  volume   = "26",
+  pages    = "126",
+  doi      = "10.1186/s12874-026-02852-x",
+  header   = "To cite slimeta in publications use:",
+  textVersion = paste(
+    "Rabbee N (2026).",
+    "Translating treatment effects between correlated endpoints.",
+    "BMC Medical Research Methodology, 26, 126.",
+    "doi:10.1186/s12874-026-02852-x"
+  )
+)

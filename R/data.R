@@ -1,0 +1,56 @@
+#' Abdominal Aortic Aneurysm (AAA) Meta-Analysis Data
+#'
+#' A dataset containing growth rate and rupture risk estimates from multiple
+#' studies of abdominal aortic aneurysm, stratified by initial diameter.
+#' This dataset demonstrates SLIM's ability to jointly model correlated
+#' endpoints across studies.
+#'
+#' @format A data frame with 148 rows and 9 variables:
+#' \describe{
+#'   \item{Diameter}{Initial AAA diameter category (mm): 30, 35, 40, 45, or 50}
+#'   \item{Study}{Study/center name}
+#'   \item{Endpoint}{Endpoint type: "GrowthRate" or "RuptureRisk"}
+#'   \item{y}{Analysis value: GrowthRate in mm/yr, RuptureRisk on log scale}
+#'   \item{se}{Standard error of y}
+#'   \item{Mean}{Original mean (GrowthRate in mm/yr, RuptureRisk as proportion)}
+#'   \item{Mean1000}{RuptureRisk per 1000 patient-years (NA for GrowthRate)}
+#'   \item{logMean}{Log-transformed mean for RuptureRisk (NA for GrowthRate)}
+#'   \item{logSE}{Standard error on log scale for RuptureRisk (NA for GrowthRate)}
+#' }
+#'
+#' @source Thompson SG, Brown LC, Sweeting MJ, Bown MJ, Kim LG; Multicentre
+#'   Aneurysm Screening Study (MASS) Group. Systematic review and meta-analysis
+#'   of the growth and rupture rates of small abdominal aortic aneurysms:
+#'   implications for surveillance intervals and their cost-effectiveness.
+#'   Health Technology Assessment. 2013;17(41):1-118. \doi{10.3310/hta17410}
+#'
+#'   Data manually extracted from multiple published AAA surveillance studies
+#'   as compiled in the systematic review.
+#'
+#' @examples
+#' data(aaa)
+#' head(aaa)
+#'
+#' \donttest{
+#' # RuptureRisk is stored on the log scale in aaa, but slim_fit() applies the
+#' # log transform itself. Supply the rate and its SE on the original scale.
+#' aaa_fit <- aaa
+#' rup <- aaa_fit$Endpoint == "RuptureRisk"
+#' aaa_fit$y[rup]  <- aaa_fit$Mean[rup]
+#' aaa_fit$se[rup] <- aaa_fit$Mean[rup] * aaa_fit$se[rup]
+#'
+#' result <- slim_fit(
+#'   data          = aaa_fit,
+#'   formula       = ~ 0 + Endpoint:factor(Diameter),
+#'   trial_col     = "Study",
+#'   endpoint_col  = "Endpoint",
+#'   y_col         = "y",
+#'   se_col        = "se",
+#'   transform     = list(RuptureRisk = "log"),
+#'   display_scale = list(RuptureRisk = 1000)
+#' )
+#'
+#' result$eta
+#' result$pooled
+#' }
+"aaa"
